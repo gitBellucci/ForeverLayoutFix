@@ -6,9 +6,9 @@ Keeps addon and UI settings after `/reload` on **WoW Forever**, including when t
 
 ## Tutorial
 
-<video src="docs/tutorial.mp4" controls width="100%"></video>
+https://github.com/gitBellucci/ForeverLayoutFix/raw/main/docs/tutorial.mp4
 
-[Watch the setup tutorial](docs/tutorial.mp4)
+[Watch the setup tutorial](https://github.com/gitBellucci/ForeverLayoutFix/blob/main/docs/tutorial.mp4)
 
 ## Why this exists
 
