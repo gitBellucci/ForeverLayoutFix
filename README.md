@@ -8,7 +8,9 @@ Keeps addon and UI settings after `/reload` on **WoW Forever**, including when t
 
 https://github.com/gitBellucci/ForeverLayoutFix/raw/main/docs/tutorial.mp4
 
-[Watch the setup tutorial](https://github.com/gitBellucci/ForeverLayoutFix/blob/main/docs/tutorial.mp4)
+https://github.com/user-attachments/assets/4b696efa-9973-4454-b412-1313eb6c2909
+
+
 
 ## Why this exists
 
