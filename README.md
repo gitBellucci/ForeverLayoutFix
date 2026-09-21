@@ -6,10 +6,7 @@ Keeps addon and UI settings after `/reload` on **WoW Forever**, including when t
 
 ## Tutorial
 
-https://github.com/gitBellucci/ForeverLayoutFix/raw/main/docs/tutorial.mp4
-
-https://github.com/user-attachments/assets/4b696efa-9973-4454-b412-1313eb6c2909
-
+https://github.com/user-attachments/assets/aaeddad0-9686-4cbe-9cd9-43af45a097b2
 
 
 ## Why this exists
