@@ -1,5 +1,5 @@
 --[[
-  ForeverLayoutFix 3.10
+  ForeverLayoutFix 3.13
   Forever often writes addon SavedVariables but fails to LOAD them for
   two-part character names. This addon's per-character SV does load
   when the character folder matches; an account-wide mirror covers the
@@ -480,6 +480,98 @@ local function foreverNameKeys()
 	}
 end
 
+-- Forever AceDB uses ruleset names (PvE/PvP/Hardcore/RP) as the realm part of
+-- charKey, not GetRealmName(). Layout profiles must bind both spellings or
+-- addons like RXP create a fresh empty profile on alts.
+local ACE_REALM_ALIASES = { "PvE", "PvP", "Hardcore", "RP" }
+
+local function aceCharKeyVariants(player, realm)
+	local out, seen = {}, {}
+	if type(player) ~= "string" or player == "" then
+		return out
+	end
+	local first = player:match("^(%S+)") or player
+	local function add(value)
+		if type(value) == "string" and value ~= "" and not seen[value] then
+			seen[value] = true
+			out[#out + 1] = value
+		end
+	end
+	local realms, rseen = {}, {}
+	local function addRealm(r)
+		if type(r) == "string" and r ~= "" and not rseen[r] then
+			rseen[r] = true
+			realms[#realms + 1] = r
+		end
+	end
+	addRealm(realm)
+	for i = 1, #ACE_REALM_ALIASES do
+		addRealm(ACE_REALM_ALIASES[i])
+	end
+	for i = 1, #realms do
+		local r = realms[i]
+		add(player .. " - " .. r)
+		add(player .. "-" .. r)
+		add(first .. " - " .. r)
+		add(first .. "-" .. r)
+	end
+	add(player)
+	add(first)
+	return out
+end
+
+local function foreverAceNameKeys()
+	return aceCharKeyVariants(UnitName("player"), GetRealmName())
+end
+
+local function chooseAceProfileName(tbl)
+	if type(tbl) ~= "table" or type(tbl.profiles) ~= "table" then
+		return
+	end
+	local function fromKeys(player, realm)
+		local try = aceCharKeyVariants(player, realm)
+		for i = 1, #try do
+			local key = try[i]
+			if type(tbl.profileKeys) == "table" then
+				local pname = tbl.profileKeys[key]
+				if type(pname) == "string" and type(tbl.profiles[pname]) == "table" then
+					return pname
+				end
+			end
+			if type(tbl.profiles[key]) == "table" then
+				return key
+			end
+		end
+	end
+	local saved = fromKeys(ForeverLayoutFixDB.lastSavePlayer, ForeverLayoutFixDB.lastSaveRealm or GetRealmName())
+	if saved then
+		return saved
+	end
+	local richest, richestn
+	if type(tbl.profileKeys) == "table" then
+		for _, prof in pairs(tbl.profileKeys) do
+			if type(prof) == "string" and type(tbl.profiles[prof]) == "table" then
+				local n = substance(tbl.profiles[prof], 100000)
+				if not richestn or n > richestn then
+					richest, richestn = prof, n
+				end
+			end
+		end
+	end
+	if richest then
+		return richest
+	end
+	for name, prof in pairs(tbl.profiles) do
+		if type(prof) == "table" then
+			local n = substance(prof, 100000)
+			if not richestn or n > richestn then
+				richest, richestn = name, n
+			end
+		end
+	end
+	return richest
+end
+
 local function aliasForeverNameMap(tbl)
 	if type(tbl) ~= "table" then
 		return
@@ -520,19 +612,10 @@ local function aliasForeverNames(tbl)
 	if type(tbl) ~= "table" then
 		return
 	end
-	local keys = foreverNameKeys()
 	if type(tbl.profileKeys) == "table" and type(tbl.profiles) == "table" then
-		local richest
-		local richestn = -1
-		for _, prof in pairs(tbl.profileKeys) do
-			if type(prof) == "string" and type(tbl.profiles[prof]) == "table" then
-				local n = substance(tbl.profiles[prof], 100000)
-				if n > richestn then
-					richest, richestn = prof, n
-				end
-			end
-		end
+		local richest = chooseAceProfileName(tbl)
 		if richest then
+			local keys = foreverAceNameKeys()
 			for i = 1, #keys do
 				tbl.profileKeys[keys[i]] = richest
 			end
@@ -1051,6 +1134,121 @@ local function applyLeatrixSnapshot(opts)
 	return false
 end
 
+local function profileWantsFastMovieSkip()
+	local function isOn(v)
+		return v == "On" or v == true
+	end
+	local vars = ForeverLayoutFixDB.vars
+	if type(vars) == "table" and type(vars.LeaPlusDB) == "table" and isOn(vars.LeaPlusDB.FasterMovieSkip) then
+		return true
+	end
+	local acc = ForeverLayoutFixProfilesDB
+	if type(acc) == "table" and acc.profileEnabled ~= false and type(acc.profiles) == "table" then
+		local rec = type(acc.activeProfile) == "string" and acc.profiles[acc.activeProfile]
+		local db = rec and rec.pack and rec.pack.vars and rec.pack.vars.LeaPlusDB
+		if type(db) == "table" and isOn(db.FasterMovieSkip) then
+			return true
+		end
+	end
+	local live = rawget(_G, "LeaPlusDB")
+	if type(live) == "table" and isOn(live.FasterMovieSkip) then
+		return true
+	end
+	local lc = getLeaPlusLC()
+	if lc and isOn(lc.FasterMovieSkip) then
+		return true
+	end
+	return false
+end
+
+-- Opening cinematic only (new characters have 0 XP). Do not cancel later story movies.
+local function isOpeningCinematic()
+	if UnitExists and not UnitExists("player") then
+		return true
+	end
+	local xp = UnitXP and UnitXP("player")
+	return type(xp) ~= "number" or xp == 0
+end
+
+local function trySkipOpeningCinematic()
+	if not profileWantsFastMovieSkip() or not isOpeningCinematic() then
+		return
+	end
+	pcall(function()
+		if StopCinematic then
+			StopCinematic()
+		end
+	end)
+	pcall(function()
+		local f = _G.CinematicFrame
+		if f and f.IsShown and f:IsShown() then
+			local btn = _G.CinematicFrameCloseDialogConfirmButton
+			if btn and btn.Click then
+				if _G.CinematicFrameCloseDialog and _G.CinematicFrameCloseDialog.Hide then
+					_G.CinematicFrameCloseDialog:Hide()
+				end
+				btn:Click()
+			end
+		end
+	end)
+	pcall(function()
+		local f = _G.MovieFrame
+		if not (f and f.IsShown and f:IsShown()) then
+			return
+		end
+		if f.StopMovie then
+			f:StopMovie()
+		end
+		if GameMovieFinished then
+			GameMovieFinished()
+		end
+		local btn = f.CloseDialog and f.CloseDialog.Buttons and f.CloseDialog.Buttons.ConfirmButton
+		if btn and btn.Click then
+			btn:Click()
+		end
+	end)
+end
+
+local movieFramesHooked = {}
+local function hookOpeningCinematicFrames()
+	local function hook(frame)
+		if type(frame) ~= "table" or movieFramesHooked[frame] or not frame.HookScript then
+			return
+		end
+		movieFramesHooked[frame] = true
+		frame:HookScript("OnShow", function()
+			trySkipOpeningCinematic()
+			if C_Timer and C_Timer.After then
+				C_Timer.After(0, trySkipOpeningCinematic)
+			end
+		end)
+	end
+	hook(_G.CinematicFrame)
+	hook(_G.MovieFrame)
+end
+
+local openingCinematicWatcher
+local function watchOpeningCinematic()
+	hookOpeningCinematicFrames()
+	if openingCinematicWatcher then
+		trySkipOpeningCinematic()
+		return
+	end
+	openingCinematicWatcher = CreateFrame("Frame")
+	openingCinematicWatcher:RegisterEvent("CINEMATIC_START")
+	openingCinematicWatcher:RegisterEvent("PLAY_MOVIE")
+	openingCinematicWatcher:RegisterEvent("PLAYER_ENTERING_WORLD")
+	openingCinematicWatcher:SetScript("OnEvent", function()
+		hookOpeningCinematicFrames()
+		trySkipOpeningCinematic()
+		if C_Timer and C_Timer.After then
+			C_Timer.After(0, trySkipOpeningCinematic)
+			C_Timer.After(0.25, trySkipOpeningCinematic)
+		end
+	end)
+	trySkipOpeningCinematic()
+end
+
 local function liveTableFor(name)
 	if name == "LeaPlusDB" then
 		pcall(syncLeatrixToDB)
@@ -1078,6 +1276,38 @@ local function liveTableFor(name)
 	return live or v, usedShadow
 end
 
+-- AceDB keeps the live settings on db.profile (defaults mixed in until logout).
+-- Copy that current profile into the snapshot so theme / frame positions / etc.
+-- are stored even when they still match defaults or were only moved this session.
+local function stampCurrentAceProfile(liveSv, copied)
+	if type(liveSv) ~= "table" or type(copied) ~= "table" then
+		return copied
+	end
+	local AceDB = LibStub and LibStub("AceDB-3.0", true)
+	if not AceDB or type(AceDB.db_registry) ~= "table" then
+		return copied
+	end
+	for db in pairs(AceDB.db_registry) do
+		if type(db) == "table" and not db.parent and db.sv == liveSv and type(db.profile) == "table" then
+			copied.profiles = copied.profiles or {}
+			copied.profileKeys = copied.profileKeys or {}
+			local pname = db.keys and db.keys.profile
+			if type(pname) ~= "string" or pname == "" then
+				pname = UnitName("player")
+			end
+			if type(pname) == "string" and pname ~= "" then
+				copied.profiles[pname] = copyClean(db.profile)
+				local keys = foreverAceNameKeys()
+				for i = 1, #keys do
+					copied.profileKeys[keys[i]] = pname
+				end
+			end
+			break
+		end
+	end
+	return copied
+end
+
 local function snapshotVars(force)
 	ForeverLayoutFixDB.vars = ForeverLayoutFixDB.vars or {}
 	local count, skipped = 0, 0
@@ -1094,6 +1324,13 @@ local function snapshotVars(force)
 			if copied == nil then
 				dbg("skip snapshot " .. name)
 				return
+			end
+			if type(copied) == "table" then
+				local ident = _G[name]
+				if isAceAddonObject(ident) then
+					ident = ident.sv
+				end
+				stampCurrentAceProfile(ident, copied)
 			end
 			if type(copied) == "table" and next(copied) == nil then
 				return
@@ -1188,38 +1425,10 @@ local function pickSourceAceProfile(sv)
 	if type(sv) ~= "table" or type(sv.profiles) ~= "table" then
 		return
 	end
-	local player = ForeverLayoutFixDB.lastSavePlayer
-	local realm = ForeverLayoutFixDB.lastSaveRealm or GetRealmName()
-	local try = {}
-	if player and realm then
-		local first = player:match("^(%S+)") or player
-		try[#try + 1] = player .. " - " .. realm
-		try[#try + 1] = player .. "-" .. realm
-		try[#try + 1] = first .. " - " .. realm
-		try[#try + 1] = first .. "-" .. realm
+	local pname = chooseAceProfileName(sv)
+	if type(pname) == "string" and type(sv.profiles[pname]) == "table" then
+		return pname, sv.profiles[pname]
 	end
-	for i = 1, #try do
-		local key = try[i]
-		if type(sv.profileKeys) == "table" then
-			local pname = sv.profileKeys[key]
-			if type(pname) == "string" and type(sv.profiles[pname]) == "table" then
-				return pname, sv.profiles[pname]
-			end
-		end
-		if type(sv.profiles[key]) == "table" then
-			return key, sv.profiles[key]
-		end
-	end
-	local bestName, best, bestn
-	for name, prof in pairs(sv.profiles) do
-		if type(prof) == "table" then
-			local n = substance(prof, 100000)
-			if not bestn or n > bestn then
-				bestName, best, bestn = name, prof, n
-			end
-		end
-	end
-	return bestName, best
 end
 
 local function bindAceSavedVars(opts)
@@ -1237,7 +1446,8 @@ local function bindAceSavedVars(opts)
 				local pname, prof = pickSourceAceProfile(dest)
 				if pname and prof then
 					dest.profileKeys = dest.profileKeys or {}
-					local keys = foreverNameKeys()
+					dest.profiles = dest.profiles or {}
+					local keys = foreverAceNameKeys()
 					for i = 1, #keys do
 						dest.profileKeys[keys[i]] = pname
 						if type(dest.profiles[keys[i]]) == "table" and dest.profiles[keys[i]] ~= prof then
@@ -1256,13 +1466,16 @@ local function bindAceSavedVars(opts)
 			return
 		end
 		local pname, prof = pickSourceAceProfile(db.sv)
+		-- Copy first: SetProfile can fire OnProfileChanged handlers that write
+		-- the current (wrong) frame positions into the source profile.
+		local saved = type(prof) == "table" and copyClean(prof) or nil
 		if pname then
 			pcall(function()
 				db:SetProfile(pname)
 			end)
 		end
-		if type(db.profile) == "table" and type(prof) == "table" then
-			wipeMerge(db.profile, prof)
+		if type(db.profile) == "table" and type(saved) == "table" then
+			wipeMerge(db.profile, saved)
 		end
 	end
 	local ace = LibStub and LibStub("AceAddon-3.0", true)
@@ -2067,7 +2280,27 @@ local function restoreLive()
 				rxp:LoadGuideTable(group, name)
 			end
 		end
-		if rxp and rxp.settings and rxp.settings.LoadFramePositions then
+		local profile = rxp and rxp.settings and rxp.settings.profile
+		if rxp and type(profile) == "table" then
+			local custom = profile.customTheme
+			if rxp.RegisterTheme and type(custom) == "table" and type(custom.name) == "string" and custom.name ~= "" and type(custom.author) == "string" then
+				rxp:RegisterTheme(custom)
+			end
+			local wantTheme = profile.activeTheme
+			local haveTheme = rxp.activeTheme and (rxp.activeTheme.name or rxp.activeTheme.displayName)
+			if rxp.LoadActiveTheme and wantTheme and wantTheme ~= haveTheme then
+				rxp:LoadActiveTheme()
+				if rxp.ReloadTheme then
+					rxp:ReloadTheme()
+				end
+			end
+			if rxp.settings and rxp.settings.LoadFramePositions then
+				rxp.settings:LoadFramePositions()
+			end
+			if rxp.tracker and rxp.tracker.UpdateLevelSplits then
+				rxp.tracker:UpdateLevelSplits("full")
+			end
+		elseif rxp and rxp.settings and rxp.settings.LoadFramePositions then
 			rxp.settings:LoadFramePositions()
 		end
 	end)
@@ -2169,6 +2402,7 @@ if type(ForeverLayoutFixDB.vars) == "table" then
 	end
 end
 injectVars({ replace = true })
+watchOpeningCinematic()
 
 -- Do not re-inject when later addons register ADDON_LOADED/PLAYER_LOGIN.
 -- That ran after Platynator had already built nameplate pools.
@@ -2182,16 +2416,19 @@ local function copyPoint(frame)
 		return nil
 	end
 	local p, rel, rp, x, y = frame:GetPoint(1)
+	if not p then
+		return nil
+	end
 	local relName = rel and rel.GetName and rel:GetName()
 	if not relName or relName == "" then
-		return nil
+		relName = "UIParent"
 	end
 	return {
 		p = p,
 		rel = relName,
-		rp = rp,
-		x = x,
-		y = y,
+		rp = rp or p,
+		x = x or 0,
+		y = y or 0,
 	}
 end
 
@@ -2254,6 +2491,45 @@ local function saveFrames()
 	end
 end
 
+local function flushLiveAddonState()
+	pcall(function()
+		local rxp = getRXP()
+		if rxp and rxp.settings and rxp.settings.SaveFramePositions then
+			rxp.settings:SaveFramePositions()
+		end
+	end)
+	pcall(function()
+		local AceDB = LibStub and LibStub("AceDB-3.0", true)
+		if not AceDB or type(AceDB.db_registry) ~= "table" then
+			return
+		end
+		for db in pairs(AceDB.db_registry) do
+			if type(db) == "table" and not db.parent and type(db.sv) == "table" and type(db.profile) == "table" then
+				local pname = db.keys and db.keys.profile
+				if type(pname) == "string" and pname ~= "" then
+					db.sv.profiles = db.sv.profiles or {}
+					if db.sv.profiles[pname] ~= db.profile then
+						db.sv.profiles[pname] = db.profile
+					end
+				end
+			end
+		end
+	end)
+	pcall(function()
+		local mbb = mbbFrame()
+		if not mbb or not mbb.GetPoint then
+			return
+		end
+		local p, rel, rp, x, y = mbb:GetPoint(1)
+		if not p then
+			return
+		end
+		local relName = (rel and rel.GetName and rel:GetName()) or "UIParent"
+		_G.MinimapButtonButtonOptions = type(_G.MinimapButtonButtonOptions) == "table" and _G.MinimapButtonButtonOptions or {}
+		_G.MinimapButtonButtonOptions.position = { p, relName, rp or p, x or 0, y or 0 }
+	end)
+end
+
 local function saveAll(force)
 	if type(ForeverLayoutFixDB.vars) == "table" then
 		for k in pairs(ForeverLayoutFixDB.vars) do
@@ -2276,6 +2552,7 @@ local function saveAll(force)
 		if applyOfflineFallback() then
 			harvestAllAddOns()
 			harvestScanGlobals()
+			flushLiveAddonState()
 			saveFrames()
 			saveLive()
 			local n = snapshotVars(true)
@@ -2287,6 +2564,7 @@ local function saveAll(force)
 	end
 	harvestAllAddOns()
 	harvestScanGlobals()
+	flushLiveAddonState()
 	saveFrames()
 	pcall(syncLeatrixToDB)
 	saveLive()
@@ -2391,6 +2669,9 @@ local function refreshActiveProfilePack()
 		if type(db.rxpFrame) == "table" then
 			rec.pack.rxpFrame = copyClean(db.rxpFrame)
 		end
+		if type(db.mbb) == "table" then
+			rec.pack.mbb = copyClean(db.mbb)
+		end
 	end
 	rec.savedAt = time and time() or 0
 	rec.savedPlayer = UnitName("player")
@@ -2484,8 +2765,31 @@ local function applyFrames()
 	local mbb = mbbFrame()
 	if mbb then
 		hookFrame(mbb, "mbb")
-		if db.mbb then
-			applyPoint(mbb, db.mbb)
+		local pt = db.mbb
+		if not pt then
+			local opts = (db.vars and db.vars.MinimapButtonButtonOptions) or rawget(_G, "MinimapButtonButtonOptions")
+			local pos = type(opts) == "table" and opts.position
+			if type(pos) == "table" and (pos[1] or pos.p) then
+				pt = {
+					p = pos.p or pos[1],
+					rel = pos.rel or (type(pos[2]) == "string" and pos[2]) or "UIParent",
+					rp = pos.rp or pos[3],
+					x = pos.x or pos[4],
+					y = pos.y or pos[5],
+				}
+			end
+		end
+		if pt then
+			applyPoint(mbb, pt)
+		end
+		local opts = (db.vars and db.vars.MinimapButtonButtonOptions) or rawget(_G, "MinimapButtonButtonOptions")
+		if type(opts) == "table" then
+			if pt then
+				opts.position = { pt.p, pt.rel or "UIParent", pt.rp or pt.p, pt.x or 0, pt.y or 0 }
+			end
+			if type(opts.scale) == "number" and mbb.SetScale then
+				mbb:SetScale(opts.scale / 10)
+			end
 		end
 	end
 	if SexyMapNS and db.minimap and Minimap then
@@ -2514,6 +2818,7 @@ local function startLoginRestore()
 	harvestScanGlobals()
 	injectVars({ late = true })
 	restoreProfileAddons(false)
+	watchOpeningCinematic()
 	C_Timer.After(0.5, function()
 		harvestAllAddOns()
 		harvestScanGlobals()
@@ -2583,6 +2888,7 @@ f:SetScript("OnEvent", function(_, event, arg1)
 		if arg1 == "Leatrix_Plus" then
 			C_Timer.After(0, function()
 				pcall(applyLeatrixSnapshot)
+				watchOpeningCinematic()
 			end)
 		end
 		if arg1 == "MidnightSimpleUnitFrames" or arg1 == "EllesmereUI" then
@@ -2607,7 +2913,7 @@ f:SetScript("OnEvent", function(_, event, arg1)
 				chat("3.1 WARNING: duplicate addon folder ForeverLayoutFix detected — disable/remove it. It shares SavedVariables and can wipe snapshots on /reload.")
 			else
 				local disk = rawget(_G, "FLF_DISK_READY") and "profiles published" or "run Setup\\FLF_Setup.cmd after Save"
-				chat("3.10 loaded. " .. disk .. ". /flf profiles")
+				chat("3.13 loaded. " .. disk .. ". /flf profiles")
 			end
 		end
 		return
@@ -3034,7 +3340,7 @@ local function ensureDebugFrame()
 	local ver = header:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	ver:SetPoint("TOPRIGHT", -40, -18)
 	ver:SetTextColor(FLF_UI.muted[1], FLF_UI.muted[2], FLF_UI.muted[3], 1)
-	local metaVer = "3.10"
+	local metaVer = "3.13"
 	pcall(function()
 		if C_AddOns and C_AddOns.GetAddOnMetadata then
 			metaVer = C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version") or metaVer

@@ -2,7 +2,7 @@
 
 Keeps addon and UI settings after `/reload` on **WoW Forever**, including when two-part character names stop SavedVariables from loading.
 
-[CurseForge](https://www.curseforge.com/wow/addons/foreverlayoutfix) · Version **3.10** · Flavor **Forever** · Interface **16001** · License **MIT**
+[CurseForge](https://www.curseforge.com/wow/addons/foreverlayoutfix) · Version **3.13** · Flavor **Forever** · Interface **16001** · License **MIT**
 
 ## Tutorial
 
@@ -70,7 +70,7 @@ You only need Administrator permission if Windows blocks writing into Program Fi
 
 ## What a profile actually copies
 
-**Addons** (examples): Bartender, SexyMap, Platynator, Leatrix Plus / Maps, Baganator / Syndicator, RXP (guide, step, window size/position), WIM, MSUF, Ellesmere, and other SavedVariables the snapshot can see.
+**Addons** (examples): Bartender, SexyMap, Platynator, Leatrix Plus / Maps, Baganator / Syndicator, RXP (guide, step, window size/position, theme, level-splits and other AceDB settings), MinimapButtonButton (including collector position), WIM, MSUF, Ellesmere, and other SavedVariables the snapshot can see. If Leatrix **Faster movie skip** is on, a new character’s opening cinematic is cancelled as soon as the profile loads.
 
 **Blizzard UI:** Edit Mode layout, a whitelist of UI CVars, key bindings, account + character macros, action bars 1–120.
 

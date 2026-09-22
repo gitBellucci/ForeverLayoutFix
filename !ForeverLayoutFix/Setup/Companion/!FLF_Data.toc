@@ -2,7 +2,7 @@
 ## Title: |cff00e6c7FLF|r Data
 ## Notes: Published layout profiles for ForeverLayoutFix. Keep enabled. Refresh with FLF_Setup.cmd after Save.
 ## Author: Bellucci
-## Version: 3.10
+## Version: 3.13
 ## SavedVariables: ForeverLayoutFixProfilesDB
 ## LoadSavedVariablesFirst: 1
 
