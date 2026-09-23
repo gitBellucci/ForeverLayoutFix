@@ -1,5 +1,5 @@
 --[[
-  ForeverLayoutFix 3.13
+  ForeverLayoutFix 3.14
   Forever often writes addon SavedVariables but fails to LOAD them for
   two-part character names. This addon's per-character SV does load
   when the character folder matches; an account-wide mirror covers the
@@ -79,6 +79,9 @@ local loginRestoreStarted = false
 local leaPlusLCRef
 local leatrixImportPending = false
 local savedProfileThisSession = false
+-- Baganator account SavedVariables usually load. Keep them unless we are
+-- applying a layout copied from another character (or Enable was clicked).
+local snapshotPrefer = {}
 
 local EXTRA_GLOBALS = {
 	"Blizzard_PTRIssueReporter_Saved",
@@ -102,7 +105,9 @@ local EXTRA_GLOBALS = {
 	"PLATYNATOR_CONFIG",
 	"PLATYNATOR_CURRENT_PROFILE",
 	"PLATYNATOR_LAST_INSTANCE",
+	"BAGANATOR_CONFIG",
 	"BAGANATOR_CURRENT_PROFILE",
+	"SYNDICATOR_CONFIG",
 	"AUCTIONATOR_SAVEDVARS",
 	"AUCTIONATOR_CHARACTER_CONFIG",
 	"AUCTIONATOR_SHOPPING_LISTS",
@@ -626,6 +631,14 @@ local function aliasForeverNames(tbl)
 	aliasForeverNameMap(tbl.char)
 	aliasForeverNameMap(tbl.chars)
 	aliasForeverNameMap(tbl.characters)
+	-- Baganator stores per-character options under CharacterSpecific[option][name].
+	if type(tbl.CharacterSpecific) == "table" then
+		for _, sub in pairs(tbl.CharacterSpecific) do
+			if type(sub) == "table" then
+				aliasForeverNameMap(sub)
+			end
+		end
+	end
 end
 
 local function varsCount()
@@ -905,6 +918,12 @@ local function applyActiveProfilePack()
 	local pack = scrubPack(copyClean(rec.pack))
 	if not applyPack(pack) then
 		return false
+	end
+	local me = UnitName("player")
+	if type(rec.savedPlayer) == "string" and type(me) == "string" and rec.savedPlayer ~= me then
+		snapshotPrefer.BAGANATOR_CONFIG = true
+		snapshotPrefer.BAGANATOR_CURRENT_PROFILE = true
+		snapshotPrefer.SYNDICATOR_CONFIG = true
 	end
 	if type(ForeverLayoutFixDB.vars) == "table" then
 		for _, v in pairs(ForeverLayoutFixDB.vars) do
@@ -1369,6 +1388,31 @@ local function snapshotVars(force)
 		end
 	end
 	dbg("snapshot wrote " .. count .. ", protected " .. skipped)
+	-- Always pin bag addon settings. These are account-wide and Baganator
+	-- writes them live; a missed harvest used to drop them from the profile.
+	pcall(function()
+		rememberName("BAGANATOR_CONFIG")
+		rememberName("BAGANATOR_CURRENT_PROFILE")
+		rememberName("SYNDICATOR_CONFIG")
+		local cfg = rawget(_G, "BAGANATOR_CONFIG")
+		if type(cfg) == "table" then
+			local copied = copyClean(cfg)
+			if type(copied) == "table" and next(copied) then
+				ForeverLayoutFixDB.vars.BAGANATOR_CONFIG = copied
+			end
+		end
+		local pname = rawget(_G, "BAGANATOR_CURRENT_PROFILE")
+		if type(pname) == "string" and pname ~= "" then
+			ForeverLayoutFixDB.vars.BAGANATOR_CURRENT_PROFILE = pname
+		end
+		local syn = rawget(_G, "SYNDICATOR_CONFIG")
+		if type(syn) == "table" then
+			local copied = copyClean(syn)
+			if type(copied) == "table" and next(copied) then
+				ForeverLayoutFixDB.vars.SYNDICATOR_CONFIG = copied
+			end
+		end
+	end)
 	return count
 end
 
@@ -1516,12 +1560,43 @@ local DISPLAY_VARS = {
 }
 local displayAddonsSettled = false
 
+local BAGANATOR_OWNED = {
+	BAGANATOR_CONFIG = true,
+	BAGANATOR_CURRENT_PROFILE = true,
+	SYNDICATOR_CONFIG = true,
+}
+
+local function baganatorLiveLooksSaved()
+	local live = rawget(_G, "BAGANATOR_CONFIG")
+	if type(live) ~= "table" or type(live.Profiles) ~= "table" then
+		return false
+	end
+	local pname = rawget(_G, "BAGANATOR_CURRENT_PROFILE")
+	local prof = (type(pname) == "string" and live.Profiles[pname]) or live.Profiles.DEFAULT
+	return type(prof) == "table" and (prof.seen_welcome or 0) >= 1
+end
+
 local function injectOne(name, value, replace)
 	if value == nil or SKIP[name] or isCacheName(name) or isUnsafeGlobal(name) or PROFILE_SKIP_VARS[name] then
 		return false
 	end
 	if displayAddonsSettled and DISPLAY_VARS[name] then
 		return false
+	end
+	-- Native Baganator.lua loaded with real settings. Replacing it with the
+	-- last /flf snapshot made bag options look like they never saved.
+	if BAGANATOR_OWNED[name] and not snapshotPrefer[name] and baganatorLiveLooksSaved() then
+		if name == "BAGANATOR_CURRENT_PROFILE" then
+			local live = rawget(_G, name)
+			if type(live) == "string" and live ~= "" then
+				return false
+			end
+		else
+			local live = rawget(_G, name)
+			if type(live) == "table" and next(live) ~= nil then
+				return false
+			end
+		end
 	end
 	local dest = _G[name]
 	if isAceAddonObject(dest) then
@@ -2223,16 +2298,24 @@ local function restoreLive()
 			end
 		end
 	end)
-	local bagCfg = ForeverLayoutFixDB.vars and ForeverLayoutFixDB.vars.BAGANATOR_CONFIG
-	if type(bagCfg) == "table" and type(bagCfg.Profiles) == "table" then
+	local function restoreBaganator()
+		local vars = ForeverLayoutFixDB.vars
+		if snapshotPrefer.BAGANATOR_CURRENT_PROFILE and type(vars) == "table" and type(vars.BAGANATOR_CURRENT_PROFILE) == "string" then
+			_G.BAGANATOR_CURRENT_PROFILE = vars.BAGANATOR_CURRENT_PROFILE
+		end
+		local bagCfg = rawget(_G, "BAGANATOR_CONFIG") or (type(vars) == "table" and vars.BAGANATOR_CONFIG)
+		if type(bagCfg) ~= "table" or type(bagCfg.Profiles) ~= "table" then
+			return
+		end
 		local pname = (type(BAGANATOR_CURRENT_PROFILE) == "string" and BAGANATOR_CURRENT_PROFILE)
-			or ForeverLayoutFixDB.vars.BAGANATOR_CURRENT_PROFILE
+			or (type(vars) == "table" and vars.BAGANATOR_CURRENT_PROFILE)
 			or "DEFAULT"
 		local profile = bagCfg.Profiles[pname] or bagCfg.Profiles.DEFAULT
 		if profile and (profile.seen_welcome or 0) >= 1 and Baganator_WelcomeFrame then
 			Baganator_WelcomeFrame:Hide()
 		end
 	end
+	restoreBaganator()
 	pcall(function()
 		bindAceSavedVars({ switchProfile = true })
 	end)
@@ -2637,8 +2720,8 @@ local function refreshActiveProfilePack()
 	else
 		rec.pack.vars = rec.pack.vars or {}
 		if type(db.vars) == "table" then
-			for _, varName in ipairs({ "LeaPlusDB", "LeaMapsDB" }) do
-				if type(db.vars[varName]) == "table" then
+			for _, varName in ipairs({ "LeaPlusDB", "LeaMapsDB", "BAGANATOR_CONFIG", "BAGANATOR_CURRENT_PROFILE", "SYNDICATOR_CONFIG" }) do
+				if db.vars[varName] ~= nil then
 					rec.pack.vars[varName] = copyClean(db.vars[varName])
 				end
 			end
@@ -2816,6 +2899,14 @@ local function startLoginRestore()
 	applyActiveProfilePack()
 	harvestAllAddOns()
 	harvestScanGlobals()
+	if snapshotPrefer.BAGANATOR_CONFIG then
+		local vars = ForeverLayoutFixDB.vars
+		if type(vars) == "table" then
+			pcall(injectOne, "BAGANATOR_CONFIG", vars.BAGANATOR_CONFIG, true)
+			pcall(injectOne, "BAGANATOR_CURRENT_PROFILE", vars.BAGANATOR_CURRENT_PROFILE, true)
+			pcall(injectOne, "SYNDICATOR_CONFIG", vars.SYNDICATOR_CONFIG, true)
+		end
+	end
 	injectVars({ late = true })
 	restoreProfileAddons(false)
 	watchOpeningCinematic()
@@ -2885,6 +2976,11 @@ f:SetScript("OnEvent", function(_, event, arg1)
 		if arg1 == "Platynator" then
 			displayAddonsSettled = true
 		end
+		if arg1 == "Baganator" or arg1 == "Syndicator" then
+			C_Timer.After(0, function()
+				restoreLive()
+			end)
+		end
 		if arg1 == "Leatrix_Plus" then
 			C_Timer.After(0, function()
 				pcall(applyLeatrixSnapshot)
@@ -2913,7 +3009,7 @@ f:SetScript("OnEvent", function(_, event, arg1)
 				chat("3.1 WARNING: duplicate addon folder ForeverLayoutFix detected — disable/remove it. It shares SavedVariables and can wipe snapshots on /reload.")
 			else
 				local disk = rawget(_G, "FLF_DISK_READY") and "profiles published" or "run Setup\\FLF_Setup.cmd after Save"
-				chat("3.13 loaded. " .. disk .. ". /flf profiles")
+				chat("3.14 loaded. " .. disk .. ". /flf profiles")
 			end
 		end
 		return
@@ -3340,7 +3436,7 @@ local function ensureDebugFrame()
 	local ver = header:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	ver:SetPoint("TOPRIGHT", -40, -18)
 	ver:SetTextColor(FLF_UI.muted[1], FLF_UI.muted[2], FLF_UI.muted[3], 1)
-	local metaVer = "3.13"
+	local metaVer = "3.14"
 	pcall(function()
 		if C_AddOns and C_AddOns.GetAddOnMetadata then
 			metaVer = C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version") or metaVer
@@ -3897,8 +3993,17 @@ local function ensureProfileFrame()
 	useBtn:SetScript("OnClick", function()
 		local ok, err = setActiveProfile(currentName(), true)
 		if ok then
+			snapshotPrefer.BAGANATOR_CONFIG = true
+			snapshotPrefer.BAGANATOR_CURRENT_PROFILE = true
+			snapshotPrefer.SYNDICATOR_CONFIG = true
 			local applied = applyActiveProfilePack()
 			if applied then
+				local vars = ForeverLayoutFixDB.vars
+				if type(vars) == "table" then
+					pcall(injectOne, "BAGANATOR_CONFIG", vars.BAGANATOR_CONFIG, true)
+					pcall(injectOne, "BAGANATOR_CURRENT_PROFILE", vars.BAGANATOR_CURRENT_PROFILE, true)
+					pcall(injectOne, "SYNDICATOR_CONFIG", vars.SYNDICATOR_CONFIG, true)
+				end
 				injectVars({ late = true })
 				restoreLive()
 				restoreProfileAddons(true)

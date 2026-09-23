@@ -2,7 +2,7 @@
 
 Keeps addon and UI settings after `/reload` on **WoW Forever**, including when two-part character names stop SavedVariables from loading.
 
-[CurseForge](https://www.curseforge.com/wow/addons/foreverlayoutfix) · Version **3.13** · Flavor **Forever** · Interface **16001** · License **MIT**
+[CurseForge](https://www.curseforge.com/wow/addons/foreverlayoutfix) · Version **3.14** · Flavor **Forever** · Interface **16001** · License **MIT**
 
 ## Tutorial
 
