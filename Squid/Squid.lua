@@ -3779,8 +3779,8 @@ local function showDebugWindow()
 end
 
 local exportFrame
-local EXPORT_FROM_REL = "WTF\\Account\\<account>\\SavedVariables\\!ForeverLayoutFix.lua"
-local EXPORT_TO_REL = "Interface\\AddOns\\!ForeverLayoutFix\\FLF_OfflineFallback.lua"
+local EXPORT_FROM_REL = "WTF\\Account\\<account>\\SavedVariables\\Squid.lua"
+local EXPORT_TO_REL = "Interface\\AddOns\\Squid\\offline.lua"
 
 local function ensureExportFrame()
 	if exportFrame then

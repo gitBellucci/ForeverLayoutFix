@@ -19,8 +19,8 @@ Login no longer rewrites other addons’ SavedVariables. Nothing is applied unti
 
 ## Install
 
-1. Copy the `!ForeverLayoutFix` folder into `World of Warcraft\_classic_beta_\Interface\AddOns\`.
-2. Keep the folder name **`!ForeverLayoutFix`**. That keeps existing profiles loading. The addon list shows **Squid**.
+1. Copy the `Squid` folder into `World of Warcraft\_classic_beta_\Interface\AddOns\`.
+2. Keep the folder name **`Squid`**. Do not also keep an old `!ForeverLayoutFix` folder.
 3. `/reload` and enable the addon.
 
 You do **not** need `!FLF_Data`, `FLF_Setup.cmd`, or any publish step. If those are still installed from an older version, delete them.
@@ -92,7 +92,7 @@ If something specific does not restore, run `/squid debug`, copy the report, and
 
 ### 4.1
 
-- Renamed to **Squid**. `/squid` opens layouts; `/flf` and `/ff` still work.
+- Renamed to **Squid** (folder, title, and `/squid`). `/flf` and `/ff` still work.
 - Save and Enable now keep **SexyMap** skin, shape, and borders.
 - Save and Enable now keep **XLoot** settings (including AceDB namespaces: Frame, Monitor, Group, and the rest).
 

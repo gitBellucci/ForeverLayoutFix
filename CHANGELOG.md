@@ -2,7 +2,7 @@
 
 ## 4.1
 
-- Renamed to **Squid**. `/squid` opens layouts; `/flf` and `/ff` still work.
+- Renamed to **Squid** (folder, title, and `/squid`). `/flf` and `/ff` still work.
 - Save and Enable now keep SexyMap skin, shape, and borders.
 - Save and Enable now keep XLoot settings, including AceDB namespaces (Frame, Monitor, Group, and the rest).
 
