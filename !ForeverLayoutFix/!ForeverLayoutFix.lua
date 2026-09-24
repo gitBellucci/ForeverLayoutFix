@@ -1,11 +1,11 @@
 --[[
-  ForeverLayoutFix 4.1
+  Squid 4.1
   Named layout profiles: addon options, macros, keybinds, action bars,
   CVars, and Edit Mode. Save a layout on any character, Enable it on
   a new character or to switch layouts on the same one.
   Addon SavedVariables now persist on their own. This addon no longer
   rewrites them at login and does not need a disk/CMD publish step.
-  /flf profiles — create, save, and enable layouts.
+  /squid — create, save, and enable layouts.
 ]]
 
 local ADDON_NAME = ...
@@ -138,7 +138,7 @@ local SKIP_EXACT = {
 
 local function chat(msg)
 	if DEFAULT_CHAT_FRAME then
-		DEFAULT_CHAT_FRAME:AddMessage("|cff00ff88[ForeverLayoutFix]|r " .. tostring(msg))
+		DEFAULT_CHAT_FRAME:AddMessage("|cff00ff88[Squid]|r " .. tostring(msg))
 	end
 end
 
@@ -3210,7 +3210,7 @@ f:SetScript("OnEvent", function(_, event, arg1)
 					n = n + 1
 				end
 			end
-			chat("4.1 loaded. " .. n .. " layout profile(s). /flf profiles")
+			chat("4.1 loaded. " .. n .. " layout profile(s). /squid")
 		end
 		return
 	end
@@ -3287,7 +3287,7 @@ local function buildDebugReport()
 	local acc = ForeverLayoutFixAccountDB
 
 	add("FLF_REPORT_V1")
-	add("=== ForeverLayoutFix support dump ===")
+	add("=== Squid support dump ===")
 	add("Paste this whole block to the addon author.")
 	add(string.rep("=", 52))
 	add("version: " .. tostring(ver))
@@ -3311,7 +3311,7 @@ local function buildDebugReport()
 	end
 	add("")
 
-	add("--- last /flf save ---")
+	add("--- last /squid save ---")
 	add("at: " .. formatSaveTime(db.lastSaveAt))
 	add("count: " .. tostring(db.lastSaveCount or 0))
 	add("player: " .. tostring(db.lastSavePlayer))
@@ -3609,7 +3609,7 @@ local function ensureDebugFrame()
 	local brand = header:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 	brand:SetPoint("TOPLEFT", 18, -14)
 	brand:SetTextColor(FLF_UI.teal[1], FLF_UI.teal[2], FLF_UI.teal[3], 1)
-	brand:SetText("ForeverLayoutFix")
+	brand:SetText("Squid")
 
 	local sub = header:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	sub:SetPoint("TOPLEFT", brand, "BOTTOMLEFT", 0, -4)
@@ -4002,7 +4002,7 @@ local function ensureProfileFrame()
 	local brand = header:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 	brand:SetPoint("TOPLEFT", 18, -14)
 	brand:SetTextColor(FLF_UI.teal[1], FLF_UI.teal[2], FLF_UI.teal[3], 1)
-	brand:SetText("Layout profiles")
+	brand:SetText("Squid")
 
 	local sub = header:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	sub:SetPoint("TOPLEFT", brand, "BOTTOMLEFT", 0, -4)
@@ -4297,9 +4297,10 @@ local function showProfileWindow()
 	end
 end
 
-SLASH_FOREVERLAYOUTFIX1 = "/flf"
-SLASH_FOREVERLAYOUTFIX2 = "/ff"
-SlashCmdList.FOREVERLAYOUTFIX = function(msg)
+SLASH_SQUID1 = "/squid"
+SLASH_SQUID2 = "/flf"
+SLASH_SQUID3 = "/ff"
+SlashCmdList.SQUID = function(msg)
 	local raw = strtrim(tostring(msg or ""))
 	msg = string.lower(raw)
 	if msg == "" or msg == "profiles" or msg == "profile" then
@@ -4321,7 +4322,7 @@ SlashCmdList.FOREVERLAYOUTFIX = function(msg)
 		local name = sanitizeProfileName(ForeverLayoutFixDB.lastProfile) or sanitizeProfileName(acc.activeProfile)
 		if not name then
 			showProfileWindow()
-			chat("Type a profile name in /flf profiles, then Save settings.")
+			chat("Type a profile name in /squid, then Save settings.")
 			return
 		end
 		local ok, err = saveToProfile(name)
@@ -4333,11 +4334,12 @@ SlashCmdList.FOREVERLAYOUTFIX = function(msg)
 		return
 	end
 	if msg == "help" then
-		chat("/flf            — layout profiles")
-		chat("/flf profiles   — save / enable / switch layouts")
-		chat("/flf save       — overwrite the last layout used on this character")
-		chat("/flf list       — addon tables in the current snapshot")
-		chat("/flf debug      — support dump")
+		chat("/squid            — layout profiles")
+		chat("/squid profiles   — save / enable / switch layouts")
+		chat("/squid save       — overwrite the last layout used on this character")
+		chat("/squid list       — addon tables in the current snapshot")
+		chat("/squid debug      — support dump")
+		chat("/flf or /ff       — same as /squid")
 		return
 	end
 	local vars = ForeverLayoutFixDB.vars
@@ -4351,8 +4353,8 @@ SlashCmdList.FOREVERLAYOUTFIX = function(msg)
 		table.sort(names)
 	end
 	if msg == "list" or n <= 50 then
-		chat("snapshot tables=" .. n .. (n > 0 and (": " .. table.concat(names, ", ")) or " (none — Save settings in /flf profiles)"))
+		chat("snapshot tables=" .. n .. (n > 0 and (": " .. table.concat(names, ", ")) or " (none — Save settings in /squid)"))
 	else
-		chat("snapshot tables=" .. n .. " (type /flf list for names)")
+		chat("snapshot tables=" .. n .. " (type /squid list for names)")
 	end
 end

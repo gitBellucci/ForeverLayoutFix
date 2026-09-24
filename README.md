@@ -1,12 +1,14 @@
-# ForeverLayoutFix
+# Squid
 
 Named layout profiles for **WoW Forever**: addon options, macros, keybinds, action bars, CVars, and Edit Mode. Save a layout on one character, Enable it on a new character or to switch layouts on the same one.
+
+Formerly ForeverLayoutFix.
 
 [CurseForge](https://www.curseforge.com/wow/addons/foreverlayoutfix) · Version **4.1** · Flavor **Forever** · Interface **16001** · License **MIT**
 
 ## Why this exists
 
-Addon SavedVariables now persist on their own. ForeverLayoutFix is no longer a disk/CMD workaround for a load bug.
+Addon SavedVariables now persist on their own. Squid is not a disk/CMD workaround for a load bug.
 
 It is a **layout profile manager**:
 
@@ -18,14 +20,14 @@ Login no longer rewrites other addons’ SavedVariables. Nothing is applied unti
 ## Install
 
 1. Copy the `!ForeverLayoutFix` folder into `World of Warcraft\_classic_beta_\Interface\AddOns\`.
-2. Keep the folder name **`!ForeverLayoutFix`**. The `!` makes it load first. Do not rename it. Do not also install a second copy named `ForeverLayoutFix`.
+2. Keep the folder name **`!ForeverLayoutFix`**. That keeps existing profiles loading. The addon list shows **Squid**.
 3. `/reload` and enable the addon.
 
 You do **not** need `!FLF_Data`, `FLF_Setup.cmd`, or any publish step. If those are still installed from an older version, delete them.
 
-## How to use (`/flf profiles`)
+## How to use (`/squid`)
 
-Type **`/flf profiles`** (or `/ff`). That window is the whole workflow.
+Type **`/squid`** (or `/flf` / `/ff`). That window is the whole workflow.
 
 | Button | What it does |
 |--------|----------------|
@@ -37,12 +39,12 @@ Type **`/flf profiles`** (or `/ff`). That window is the whole workflow.
 
 1. Log into the character whose UI you want to keep.
 2. Set up bars, minimap, quest guide, bags, loot, and the rest.
-3. `/flf profiles` → type a name → **Save settings**.
+3. `/squid` → type a name → **Save settings**.
 
 ### New character or another alt
 
 1. Log in.
-2. `/flf profiles` → select the profile → **Enable** → type `/reload`.
+2. `/squid` → select the profile → **Enable** → type `/reload`.
 
 ### Switch layouts on the same character
 
@@ -70,19 +72,19 @@ Action bars need a hardware click: click **Enable** out of combat.
 
 | Command | Purpose |
 |---------|---------|
-| `/flf profiles` | Profile window (Save / Enable / rename) |
-| `/flf save` | Overwrite the last layout used on this character |
-| `/flf list` | Names of snapshot SavedVariables tables |
-| `/flf debug` | Support dump (Select All → Ctrl+C) |
-| `/flf verbose` | Toggle inject/snapshot log spam |
-| `/flf help` | Command list |
-| `/ff` | Same as `/flf` |
+| `/squid` | Profile window (Save / Enable / rename) |
+| `/squid save` | Overwrite the last layout used on this character |
+| `/squid list` | Names of snapshot SavedVariables tables |
+| `/squid debug` | Support dump (Select All → Ctrl+C) |
+| `/squid verbose` | Toggle inject/snapshot log spam |
+| `/squid help` | Command list |
+| `/flf` / `/ff` | Same as `/squid` |
 
-If something specific does not restore, run `/flf debug`, copy the report, and send it with a bug report.
+If something specific does not restore, run `/squid debug`, copy the report, and send it with a bug report.
 
 ## Notes
 
-- Some addons only write their locals on logout. A `/reload` after `/flf save` is the real test.
+- Some addons only write their locals on logout. A `/reload` after `/squid save` is the real test.
 - If a CurseForge update breaks the TOC, delete the addon folder and install it again.
 - Variable names are read from each addon’s TOC, plus known extras (Leatrix, RXP, SexyMap, XLoot, DamageForever, WIM, MSUF, EllesmereUI, and similar).
 
@@ -90,10 +92,11 @@ If something specific does not restore, run `/flf debug`, copy the report, and s
 
 ### 4.1
 
+- Renamed to **Squid**. `/squid` opens layouts; `/flf` and `/ff` still work.
 - Save and Enable now keep **SexyMap** skin, shape, and borders.
 - Save and Enable now keep **XLoot** settings (including AceDB namespaces: Frame, Monitor, Group, and the rest).
 
 ### 4.0
 
 - Blizzard now loads SavedVariables. This addon no longer rewrites other addons at login and no longer needs `FLF_Setup.cmd` / `!FLF_Data`.
-- Profiles still live in `/flf profiles`: Save on one character, Enable on any other (or switch layouts on the same character).
+- Profiles still live in `/squid`: Save on one character, Enable on any other (or switch layouts on the same character).

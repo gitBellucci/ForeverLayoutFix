@@ -1,5 +1,5 @@
 ## Interface: 11500, 11507, 11508, 11509, 11510, 16000, 16001
-## Title: !ForeverLayoutFix
+## Title: Squid
 ## Notes: Named layout profiles: addon settings, macros, keybinds, and action bars. Save on one character, Enable on any other.
 ## Author: Bellucci
 ## Version: 4.1
