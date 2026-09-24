@@ -1,35 +1,14 @@
 --[[
-  ForeverLayoutFix 3.14
-  Forever often writes addon SavedVariables but fails to LOAD them for
-  two-part character names. This addon's per-character SV does load
-  when the character folder matches; an account-wide mirror covers the
-  cases where Forever opens the wrong character folder.
-  Character keys are always built from UnitName/GetRealmName at runtime
-  — nothing is hardcoded to a specific character.
-  Do NOT install a second copy named ForeverLayoutFix alongside this
-  !ForeverLayoutFix folder: both declare the same SavedVariables, and a
-  load error in the duplicate wipes the shared globals after /reload.
-  /flf save snapshots other addons' SavedVariables and injects them
-  back on the next login/reload.
-  Run Setup\FLF_Setup.cmd with WoW closed after every Save settings.
-  That copies the profile into !FLF_Data so alts can load it.
-  /flf profiles — named layouts that any character can use.
+  ForeverLayoutFix 4.1
+  Named layout profiles: addon options, macros, keybinds, action bars,
+  CVars, and Edit Mode. Save a layout on any character, Enable it on
+  a new character or to switch layouts on the same one.
+  Addon SavedVariables now persist on their own. This addon no longer
+  rewrites them at login and does not need a disk/CMD publish step.
+  /flf profiles — create, save, and enable layouts.
 ]]
 
 local ADDON_NAME = ...
-
--- If the user copied a WTF dump over FLF_OfflineFallback.lua, that file may
--- assign AccountDB/fallback after a successful SavedVariables load. Keep the
--- tables that actually loaded this session when they have data.
-if type(FLF_PreDumpCharDB) == "table" and next(FLF_PreDumpCharDB) ~= nil then
-	ForeverLayoutFixDB = FLF_PreDumpCharDB
-end
-if type(FLF_PreDumpAccountDB) == "table" and next(FLF_PreDumpAccountDB) ~= nil then
-	ForeverLayoutFixAccountDB = FLF_PreDumpAccountDB
-end
-if type(FLF_PreDumpFallback) == "table" and type(FLF_PreDumpFallback.vars) == "table" and next(FLF_PreDumpFallback.vars) then
-	FLF_OfflineFallback = FLF_PreDumpFallback
-end
 
 ForeverLayoutFixDB = ForeverLayoutFixDB or {}
 ForeverLayoutFixDB.vars = ForeverLayoutFixDB.vars or {}
@@ -97,11 +76,18 @@ local EXTRA_GLOBALS = {
 	"Bartender4DB",
 	"PlaterDB",
 	"SexyMap2DB",
+	"XLootADB",
+	"XLootOptions",
 	"MSUF_DB",
 	"MSUF_GlobalDB",
 	"MSUF_ActiveProfile",
 	"EllesmereUIDB",
 	"MinimapButtonButtonOptions",
+	-- DamageForever (Details!): names do not end in DB / Options
+	"_detalhes_global",
+	"_detalhes_database",
+	"ThreatForeverDB",
+	"DetailsTinyThreatDB",
 	"PLATYNATOR_CONFIG",
 	"PLATYNATOR_CURRENT_PROFILE",
 	"PLATYNATOR_LAST_INSTANCE",
@@ -356,6 +342,8 @@ local function looksLikeSavedVars(name, value)
 		or name:find("_CURRENT_PROFILE$")
 		or name:find("_ActiveProfile$")
 		or name:find("_LAST_INSTANCE$")
+		-- DamageForever account + character tables (_detalhes_global / _detalhes_database)
+		or (name:find("^_detalhes_") and vt == "table")
 		-- Addon Foo3_Data / Foo_Data, but not Blizzard *CategoryData (filtered above)
 		or (name:find("_%d*Data$") or name:find("%d_Data$")) and vt == "table"
 end
@@ -683,138 +671,20 @@ local function applyPack(pack)
 	return true
 end
 
--- Restore from account mirror. Forever often opens the wrong character folder
--- (first-name collision), so the per-character SV arrives empty even though
--- /flf save wrote a full snapshot. Account SV uses no character path.
-local function hydrateFromAccount(force)
-	local acc = ForeverLayoutFixAccountDB
-	if type(acc) ~= "table" then
-		return false
-	end
-	local current = packSubstance(ForeverLayoutFixDB)
-	local function accept(pack)
-		local n = packSubstance(pack)
-		if n < 1 then
-			return false
-		end
-		-- Replace empty, or replace a much weaker wrong-folder snapshot.
-		if not force and current > 0 and n < math.max(2, current * 0.5) then
-			return false
-		end
-		if force and current > 0 and n <= current then
-			return false
-		end
-		return applyPack(pack)
-	end
-
-	local keys = foreverNameKeys()
-	for i = 1, #keys do
-		if accept(acc[keys[i]]) then
-			return true, keys[i]
-		end
-	end
-
-	local name, realm = UnitName("player"), GetRealmName()
-	local first = name and name:match("^(%S+)") or name
-	local guid = UnitGUID and UnitGUID("player")
-
-	if type(guid) == "string" and accept(acc[guid]) then
-		return true, "guid"
-	end
-
-	if type(realm) == "string" and type(name) == "string" then
-		local bestKey, bestN
-		for k, pack in pairs(acc) do
-			if type(k) == "string" and k:sub(1, 1) ~= "_" and k ~= "profiles" and k ~= "activeProfile" and type(pack) == "table" then
-				if k:find(name, 1, true) and k:find(realm, 1, true) then
-					local n = packSubstance(pack)
-					if not bestN or n > bestN then
-						bestKey, bestN = k, n
-					end
-				elseif first and k:find(first, 1, true) and k:find(realm, 1, true) then
-					local n = packSubstance(pack)
-					if not bestN or n > bestN then
-						bestKey, bestN = k, n
-					end
-				end
-			end
-		end
-		if bestKey and accept(acc[bestKey]) then
-			return true, bestKey
-		end
-	end
-
-	-- Last successful save on this account (same character only).
-	local last = acc._last
-	if type(last) == "table" then
-		local same = (acc._lastFullName == name and acc._lastRealm == realm)
-			or (first and acc._lastFullName and acc._lastFullName:match("^(%S+)") == first and acc._lastRealm == realm)
-			or (guid and acc._lastGuid == guid)
-		if same and accept(last) then
-			return true, "_last"
-		end
-		-- Character SV empty: use last save only if same realm (avoids
-		-- blanking an alt with another character's layout across realms).
-		if varsAreEmpty() and acc._lastRealm == realm and accept(last) then
-			return true, "_last-empty"
-		end
-	end
+-- Restore from account mirror. Unused since 4.0: native SavedVariables load.
+local function hydrateFromAccount()
 	return false
 end
 
 local function saveAccountMirror()
-	ForeverLayoutFixAccountDB = ForeverLayoutFixAccountDB or {}
-	if varsAreEmpty() then
-		return
-	end
-	-- One copy only. Cloning the snapshot under every name/guid key made
-	-- the account file hundreds of MB and unloadable on alts.
-	local pack = copyClean(ForeverLayoutFixDB)
-	if type(pack) ~= "table" or type(pack.vars) ~= "table" then
-		return
-	end
-	local acc = ForeverLayoutFixAccountDB
-	for k in pairs(acc) do
-		if type(k) == "string" and k:sub(1, 1) ~= "_" then
-			acc[k] = nil
-		end
-	end
-	acc.profiles = nil
-	acc.activeProfile = nil
-	acc.profileEnabled = nil
-	acc._last = pack
-	acc._lastFullName = UnitName("player")
-	acc._lastRealm = GetRealmName()
-	acc._lastGuid = UnitGUID and UnitGUID("player") or nil
 end
 
--- WoW can write WTF SavedVariables on logout, but never Interface\AddOns.
--- After close, the user copies that dump over FLF_OfflineFallback.lua.
 local function refreshOfflineFallbackExport()
-	if varsAreEmpty() then
-		return false
-	end
-	local pack = copyClean(ForeverLayoutFixDB)
-	if type(pack) ~= "table" or type(pack.vars) ~= "table" or not next(pack.vars) then
-		return false
-	end
-	_G.FLF_OfflineFallback = pack
-	return true
+	return false
 end
 
 local function applyOfflineFallback()
-	if not varsAreEmpty() then
-		return false
-	end
-	local fb = rawget(_G, "FLF_OfflineFallback")
-	if type(fb) ~= "table" or type(fb.vars) ~= "table" or not next(fb.vars) then
-		return false
-	end
-	if not applyPack(copyClean(fb)) then
-		return false
-	end
-	saveAccountMirror()
-	return true
+	return false
 end
 
 local PROFILE_SKIP_VARS = {
@@ -823,7 +693,58 @@ local PROFILE_SKIP_VARS = {
 	QuestieConfigCharacter = true,
 	QuestieProfilerEnabled = true,
 	RXPCTrackingData = true,
+	-- Details debug / old-config backups, not layout
+	__details_backup = true,
+	__details_debug = true,
 }
+
+-- Combat logs and live instance objects are not layout and explode copyClean.
+local DETAILS_CHAR_SKIP = {
+	tabela_historico = true,
+	tabela_overall = true,
+	tabela_instancias = true,
+	saved_pet_cache = true,
+	nick_tag_cache = true,
+	tabela_vigente = true,
+	damage_meter_sessions = true,
+}
+
+local function copyDetailsCharacterDB(src)
+	if type(src) ~= "table" then
+		return copyClean(src)
+	end
+	local out = {}
+	for k, v in pairs(src) do
+		if not DETAILS_CHAR_SKIP[k] then
+			out[k] = copyClean(v)
+		end
+	end
+	return out
+end
+
+local function slimCopiedDetailsGlobal(copied)
+	if type(copied) ~= "table" then
+		return copied
+	end
+	copied.exit_log = nil
+	copied.exit_errors = nil
+	copied.report_lines = nil
+	return copied
+end
+
+local function detailsAddon()
+	local d = rawget(_G, "Details") or rawget(_G, "_detalhes")
+	if type(d) == "table" and (type(d.SaveProfile) == "function" or type(d.ApplyProfile) == "function") then
+		return d
+	end
+end
+
+local function rememberDetailsNames()
+	rememberName("_detalhes_global")
+	rememberName("_detalhes_database")
+	rememberName("ThreatForeverDB")
+	rememberName("DetailsTinyThreatDB")
+end
 
 local function ensureProfileStore()
 	ForeverLayoutFixProfilesDB = ForeverLayoutFixProfilesDB or {}
@@ -904,7 +825,7 @@ end
 
 local function applyActiveProfilePack()
 	local acc = ensureProfileStore()
-	if type(acc) ~= "table" or acc.profileEnabled == false then
+	if type(acc) ~= "table" then
 		return false
 	end
 	local name = acc.activeProfile
@@ -1307,21 +1228,31 @@ local function stampCurrentAceProfile(liveSv, copied)
 		return copied
 	end
 	for db in pairs(AceDB.db_registry) do
-		if type(db) == "table" and not db.parent and db.sv == liveSv and type(db.profile) == "table" then
-			copied.profiles = copied.profiles or {}
-			copied.profileKeys = copied.profileKeys or {}
+		if type(db) == "table" and type(db.profile) == "table" then
 			local pname = db.keys and db.keys.profile
 			if type(pname) ~= "string" or pname == "" then
 				pname = UnitName("player")
 			end
 			if type(pname) == "string" and pname ~= "" then
-				copied.profiles[pname] = copyClean(db.profile)
-				local keys = foreverAceNameKeys()
-				for i = 1, #keys do
-					copied.profileKeys[keys[i]] = pname
+				if not db.parent and db.sv == liveSv then
+					copied.profiles = copied.profiles or {}
+					copied.profileKeys = copied.profileKeys or {}
+					copied.profiles[pname] = copyClean(db.profile)
+					local keys = foreverAceNameKeys()
+					for i = 1, #keys do
+						copied.profileKeys[keys[i]] = pname
+					end
+				elseif db.parent and db.parent.sv == liveSv then
+					-- XLoot Frame/Monitor/etc. live in AceDB namespaces.
+					local nsName = db.keys and db.keys.namespace
+					if type(nsName) == "string" and nsName ~= "" then
+						copied.namespaces = copied.namespaces or {}
+						copied.namespaces[nsName] = copied.namespaces[nsName] or {}
+						copied.namespaces[nsName].profiles = copied.namespaces[nsName].profiles or {}
+						copied.namespaces[nsName].profiles[pname] = copyClean(db.profile)
+					end
 				end
 			end
-			break
 		end
 	end
 	return copied
@@ -1339,7 +1270,14 @@ local function snapshotVars(force)
 			if v == nil then
 				return
 			end
-			local copied = copyClean(v)
+			local copied
+			if name == "_detalhes_database" then
+				copied = copyDetailsCharacterDB(v)
+			elseif name == "_detalhes_global" then
+				copied = slimCopiedDetailsGlobal(copyClean(v))
+			else
+				copied = copyClean(v)
+			end
 			if copied == nil then
 				dbg("skip snapshot " .. name)
 				return
@@ -1364,6 +1302,9 @@ local function snapshotVars(force)
 				if oldName ~= "" and newName == "" then
 					drop = true
 				end
+			end
+			if name == "_detalhes_global" or name == "_detalhes_database" or name == "SexyMap2DB" or name == "XLootADB" then
+				drop = false
 			end
 			if drop and (not force or not usedShadow) then
 				skipped = skipped + 1
@@ -1410,6 +1351,51 @@ local function snapshotVars(force)
 			local copied = copyClean(syn)
 			if type(copied) == "table" and next(copied) then
 				ForeverLayoutFixDB.vars.SYNDICATOR_CONFIG = copied
+			end
+		end
+		rememberDetailsNames()
+		local xloot = rawget(_G, "XLootADB")
+		if type(xloot) == "table" then
+			rememberName("XLootADB")
+			local copied = copyClean(xloot)
+			if type(copied) == "table" then
+				stampCurrentAceProfile(xloot, copied)
+				if next(copied) then
+					ForeverLayoutFixDB.vars.XLootADB = copied
+				end
+			end
+		end
+		local smap = rawget(_G, "SexyMap2DB")
+		if type(smap) == "table" then
+			rememberName("SexyMap2DB")
+			local copied = copyClean(smap)
+			if type(copied) == "table" and next(copied) then
+				ForeverLayoutFixDB.vars.SexyMap2DB = copied
+			end
+		end
+		local glob = rawget(_G, "_detalhes_global")
+		if type(glob) == "table" then
+			local copied = slimCopiedDetailsGlobal(copyClean(glob))
+			if type(copied) == "table" and next(copied) then
+				ForeverLayoutFixDB.vars._detalhes_global = copied
+			end
+		end
+		local charDB = rawget(_G, "_detalhes_database")
+		if type(charDB) == "table" then
+			local copied = copyDetailsCharacterDB(charDB)
+			if type(copied) == "table" and next(copied) then
+				ForeverLayoutFixDB.vars._detalhes_database = copied
+			end
+		end
+		local threat = rawget(_G, "ThreatForeverDB") or rawget(_G, "DetailsTinyThreatDB")
+		if type(threat) == "table" and next(threat) then
+			local copied = copyClean(threat)
+			if type(copied) == "table" and next(copied) then
+				if rawget(_G, "ThreatForeverDB") == threat then
+					ForeverLayoutFixDB.vars.ThreatForeverDB = copied
+				else
+					ForeverLayoutFixDB.vars.DetailsTinyThreatDB = copied
+				end
 			end
 		end
 	end)
@@ -2215,8 +2201,11 @@ local function restoreBlizzardUI(opts)
 	return { macros = macros, cvars = cvars, binds = binds, edit = edit, bars = bars, barErr = barErr }
 end
 
+local flushSexyMap, applySexyMapLayout, applyXLootLayout
+
 local function saveLive()
 	local db = ForeverLayoutFixDB
+	pcall(flushSexyMap)
 	if SexyMapNS then
 		if SexyMapNS.shapes and SexyMapNS.shapes.GetShape then
 			db.sexyMapShape = SexyMapNS.shapes:GetShape()
@@ -2265,6 +2254,7 @@ local function saveLive()
 end
 
 local function restoreLive()
+	pcall(applySexyMapLayout)
 	pcall(function()
 		if SexyMapNS then
 			if ForeverLayoutFixDB.sexyMapShape and SexyMapNS.shapes and SexyMapNS.shapes.ApplyShape then
@@ -2276,7 +2266,11 @@ local function restoreLive()
 				if src.borders then
 					dst.borders = copyClean(src.borders)
 				end
+				if src.backdrop then
+					dst.backdrop = copyClean(src.backdrop)
+				end
 				dst.hideBlizzard = src.hideBlizzard
+				dst.applyPreset = src.applyPreset
 				if SexyMapNS.borders.ApplySettings then
 					SexyMapNS.borders:ApplySettings()
 				elseif SexyMapNS.borders.UpdateBorder then
@@ -2319,6 +2313,7 @@ local function restoreLive()
 	pcall(function()
 		bindAceSavedVars({ switchProfile = true })
 	end)
+	pcall(applyXLootLayout)
 	pcall(function()
 		local rxp = getRXP()
 		local data = _G.RXPCData
@@ -2413,6 +2408,56 @@ local function restoreLive()
 	end)
 end
 
+local function applyDetailsLayout()
+	local Details = detailsAddon()
+	if not Details or type(Details.ApplyProfile) ~= "function" then
+		return
+	end
+	local snap = ForeverLayoutFixDB.vars
+	if type(snap) ~= "table" then
+		return
+	end
+	if snap._detalhes_global ~= nil then
+		pcall(injectOne, "_detalhes_global", snap._detalhes_global, true)
+	end
+	if snap._detalhes_database ~= nil then
+		pcall(injectOne, "_detalhes_database", snap._detalhes_database, true)
+	end
+	if snap.ThreatForeverDB ~= nil then
+		pcall(injectOne, "ThreatForeverDB", snap.ThreatForeverDB, true)
+	end
+	if snap.DetailsTinyThreatDB ~= nil then
+		pcall(injectOne, "DetailsTinyThreatDB", snap.DetailsTinyThreatDB, true)
+	end
+	local glob = rawget(_G, "_detalhes_global")
+	local charDB = rawget(_G, "_detalhes_database")
+	local want
+	if type(snap._detalhes_database) == "table" then
+		want = snap._detalhes_database.active_profile
+	end
+	if (type(want) ~= "string" or want == "") and type(charDB) == "table" then
+		want = charDB.active_profile
+	end
+	local profiles = type(glob) == "table" and glob.__profiles
+	if (type(want) ~= "string" or want == "" or type(profiles) ~= "table" or type(profiles[want]) ~= "table") and type(profiles) == "table" then
+		want = nil
+		for pname, prof in pairs(profiles) do
+			if type(prof) == "table" and type(prof.instances) == "table" and #prof.instances > 0 then
+				want = pname
+				break
+			end
+		end
+	end
+	if type(want) ~= "string" or want == "" then
+		return
+	end
+	if type(charDB) == "table" then
+		charDB.active_profile = want
+	end
+	-- bNoSave: never write this character's empty windows over the saved profile.
+	Details:ApplyProfile(want, true)
+end
+
 local function restoreProfileAddons(doRefresh)
 	pcall(function()
 		if type(MSUF_GlobalDB) == "table" then
@@ -2465,6 +2510,7 @@ local function restoreProfileAddons(doRefresh)
 			eui.RefreshAllAddons(true)
 		end
 	end)
+	pcall(applyDetailsLayout)
 end
 
 for name in pairs(ForeverLayoutFixDB.varNames) do
@@ -2472,23 +2518,6 @@ for name in pairs(ForeverLayoutFixDB.varNames) do
 		discovered[name] = true
 	end
 end
-hydrateFromAccount()
-if varsAreEmpty() then
-	applyOfflineFallback()
-end
-applyActiveProfilePack()
-if type(ForeverLayoutFixDB.vars) == "table" then
-	for k in pairs(ForeverLayoutFixDB.vars) do
-		if isUnsafeGlobal(k) then
-			ForeverLayoutFixDB.vars[k] = nil
-		end
-	end
-end
-injectVars({ replace = true })
-watchOpeningCinematic()
-
--- Do not re-inject when later addons register ADDON_LOADED/PLAYER_LOGIN.
--- That ran after Platynator had already built nameplate pools.
 
 local function copyPoint(frame)
 	if not frame or not frame.GetPoint then
@@ -2549,6 +2578,214 @@ local function mbbFrame()
 	return _G.MinimapButtonButtonButton
 end
 
+local SEXYMAP_MODULES = {
+	"core", "borders", "buttons", "clock", "coordinates", "movers", "zonetext", "hudmap", "ping",
+}
+
+local function sexyMapCharKey()
+	local n, r = UnitName("player"), GetRealmName()
+	if n and r then
+		return n .. "-" .. r
+	end
+end
+
+local function sexyMapSlot(sv, create)
+	if type(sv) ~= "table" then
+		return
+	end
+	local try = aceCharKeyVariants(UnitName("player"), GetRealmName())
+	for i = 1, #try do
+		local slot = sv[try[i]]
+		if type(slot) == "string" then
+			sv.global = type(sv.global) == "table" and sv.global or {}
+			return sv.global
+		elseif type(slot) == "table" then
+			return slot
+		end
+	end
+	if not create then
+		return
+	end
+	local char = sexyMapCharKey()
+	if not char then
+		return
+	end
+	sv[char] = {}
+	return sv[char]
+end
+
+local function pickSexyMapSource(sv)
+	if type(sv) ~= "table" then
+		return
+	end
+	local best, bestn
+	local function consider(v)
+		if type(v) ~= "table" then
+			return
+		end
+		local s = substance(v, 8000)
+		if not bestn or s > bestn then
+			best, bestn = v, s
+		end
+	end
+	local try = aceCharKeyVariants(UnitName("player"), GetRealmName())
+	local savedP = ForeverLayoutFixDB.lastSavePlayer
+	local savedR = ForeverLayoutFixDB.lastSaveRealm or GetRealmName()
+	if type(savedP) == "string" and savedP ~= "" then
+		local extra = aceCharKeyVariants(savedP, savedR)
+		for i = 1, #extra do
+			try[#try + 1] = extra[i]
+		end
+	end
+	for i = 1, #try do
+		local v = sv[try[i]]
+		if type(v) == "string" then
+			v = sv.global
+		end
+		consider(v)
+	end
+	if best then
+		return best
+	end
+	for k, v in pairs(sv) do
+		if k ~= "presets" and k ~= "global" and type(v) == "table" then
+			consider(v)
+		end
+	end
+	if (not bestn or bestn < 2) and type(sv.global) == "table" then
+		return sv.global
+	end
+	return best
+end
+
+function flushSexyMap()
+	local sv = rawget(_G, "SexyMap2DB")
+	if type(sv) ~= "table" then
+		_G.SexyMap2DB = {}
+		sv = _G.SexyMap2DB
+	end
+	rememberName("SexyMap2DB")
+	local sm = _G.SexyMapNS
+	local slot = sexyMapSlot(sv, true)
+	if type(slot) ~= "table" then
+		return
+	end
+	if sm then
+		for i = 1, #SEXYMAP_MODULES do
+			local key = SEXYMAP_MODULES[i]
+			local mod = sm[key]
+			if type(mod) == "table" and type(mod.db) == "table" then
+				slot[key] = copyClean(mod.db)
+			end
+		end
+		if sm.shapes and sm.shapes.GetShape then
+			slot.core = type(slot.core) == "table" and slot.core or {}
+			slot.core.shape = sm.shapes:GetShape()
+		end
+	end
+	local db = ForeverLayoutFixDB
+	db.sexyMapProfile = copyClean(slot)
+	if slot.core then
+		db.sexyMapCore = copyClean(slot.core)
+		db.sexyMapShape = slot.core.shape
+	end
+	if slot.borders then
+		db.sexyMapBorders = copyClean(slot.borders)
+	end
+end
+
+function applySexyMapLayout()
+	local vars = ForeverLayoutFixDB.vars
+	local sv = rawget(_G, "SexyMap2DB")
+	if type(vars) == "table" and type(vars.SexyMap2DB) == "table" then
+		if type(sv) ~= "table" then
+			_G.SexyMap2DB = copyClean(vars.SexyMap2DB)
+			sv = _G.SexyMap2DB
+		else
+			wipeMerge(sv, vars.SexyMap2DB)
+		end
+	end
+	if type(sv) ~= "table" then
+		return
+	end
+	local src = pickSexyMapSource(sv)
+	local extra = ForeverLayoutFixDB.sexyMapProfile
+	if type(extra) == "table" and substance(extra, 8000) > substance(src, 8000) then
+		src = extra
+	end
+	if type(src) ~= "table" then
+		return
+	end
+	local slot = sexyMapSlot(sv, true)
+	if type(slot) == "table" and slot ~= src then
+		wipeMerge(slot, src)
+	end
+	local sm = _G.SexyMapNS
+	if not sm then
+		return
+	end
+	local live = (type(slot) == "table" and slot) or src
+	for i = 1, #SEXYMAP_MODULES do
+		local key = SEXYMAP_MODULES[i]
+		local mod = sm[key]
+		if type(mod) == "table" and type(mod.db) == "table" and type(live[key]) == "table" then
+			wipeMerge(mod.db, live[key])
+		end
+	end
+	if type(live.core) == "table" and sm.core and type(sm.core.db) == "table" then
+		wipeMerge(sm.core.db, live.core)
+	end
+	local shape = (sm.core and sm.core.db and sm.core.db.shape) or (live.core and live.core.shape)
+	if shape and sm.shapes and sm.shapes.ApplyShape then
+		sm.shapes:ApplyShape(shape)
+	end
+	if sm.borders and sm.borders.ApplySettings then
+		sm.borders:ApplySettings()
+	elseif sm.borders and sm.borders.UpdateBorder then
+		sm.borders:UpdateBorder()
+	end
+end
+
+function applyXLootLayout()
+	local vars = ForeverLayoutFixDB.vars
+	local src = type(vars) == "table" and vars.XLootADB
+	local dest = rawget(_G, "XLootADB")
+	if type(src) == "table" then
+		if type(dest) ~= "table" then
+			_G.XLootADB = copyClean(src)
+			dest = _G.XLootADB
+		else
+			wipeMerge(dest, src)
+		end
+		aliasForeverNames(dest)
+	end
+	local x = _G.XLoot
+	if type(x) ~= "table" then
+		return
+	end
+	local AceDB = LibStub and LibStub("AceDB-3.0", true)
+	if AceDB and type(AceDB.db_registry) == "table" then
+		for db in pairs(AceDB.db_registry) do
+			if type(db) == "table" and (db == x.db or (db.parent and db.parent == x.db)) then
+				local pname, prof = pickSourceAceProfile(db.sv)
+				if pname and type(db.SetProfile) == "function" then
+					pcall(function()
+						db:SetProfile(pname)
+					end)
+				end
+				if type(db.profile) == "table" and type(prof) == "table" then
+					wipeMerge(db.profile, copyClean(prof))
+				end
+			end
+		end
+	end
+	if type(x.ApplyOptions) == "function" then
+		x:ApplyOptions(true)
+	elseif type(x.SetSkin) == "function" and x.opt and x.opt.skin then
+		x:SetSkin(x.opt.skin)
+	end
+end
+
 local function saveFrames()
 	local db = ForeverLayoutFixDB
 	local reporter = findIssueReporter()
@@ -2587,7 +2824,9 @@ local function flushLiveAddonState()
 			return
 		end
 		for db in pairs(AceDB.db_registry) do
-			if type(db) == "table" and not db.parent and type(db.sv) == "table" and type(db.profile) == "table" then
+			-- Include AceDB namespaces (XLoot Frame/Monitor/etc.). Skipping
+			-- db.parent left those settings only in memory until logout.
+			if type(db) == "table" and type(db.sv) == "table" and type(db.profile) == "table" then
 				local pname = db.keys and db.keys.profile
 				if type(pname) == "string" and pname ~= "" then
 					db.sv.profiles = db.sv.profiles or {}
@@ -2611,6 +2850,62 @@ local function flushLiveAddonState()
 		_G.MinimapButtonButtonOptions = type(_G.MinimapButtonButtonOptions) == "table" and _G.MinimapButtonButtonOptions or {}
 		_G.MinimapButtonButtonOptions.position = { p, relName, rp or p, x or 0, y or 0 }
 	end)
+	pcall(flushSexyMap)
+	pcall(function()
+		local Details = detailsAddon()
+		if not Details then
+			return
+		end
+		rememberDetailsNames()
+		if type(Details.SaveProfile) == "function" then
+			Details:SaveProfile()
+		elseif type(Details.SaveLocalInstanceConfig) == "function" then
+			Details:SaveLocalInstanceConfig()
+		end
+		local glob = rawget(_G, "_detalhes_global")
+		if type(glob) ~= "table" then
+			_G._detalhes_global = {}
+			glob = _G._detalhes_global
+		end
+		if type(Details.default_global_data) == "table" then
+			for key in pairs(Details.default_global_data) do
+				if key ~= "__profiles" then
+					local v = Details[key]
+					local vt = type(v)
+					if vt == "table" then
+						glob[key] = copyClean(v)
+					elseif vt ~= "function" and vt ~= "userdata" and vt ~= "thread" then
+						glob[key] = v
+					end
+				end
+			end
+		end
+		local charDB = rawget(_G, "_detalhes_database")
+		if type(charDB) ~= "table" then
+			_G._detalhes_database = {}
+			charDB = _G._detalhes_database
+		end
+		if type(Details.default_player_data) == "table" then
+			for key in pairs(Details.default_player_data) do
+				if not DETAILS_CHAR_SKIP[key] then
+					local v = Details[key]
+					local vt = type(v)
+					if vt == "table" then
+						charDB[key] = copyClean(v)
+					elseif vt ~= "function" and vt ~= "userdata" and vt ~= "thread" then
+						charDB[key] = v
+					end
+				end
+			end
+		end
+		if type(Details.active_profile) == "string" and Details.active_profile ~= "" then
+			charDB.active_profile = Details.active_profile
+		end
+		local pluginDB = Details.plugin_database
+		if type(pluginDB) == "table" then
+			charDB.plugin_database = copyClean(pluginDB)
+		end
+	end)
 end
 
 local function saveAll(force)
@@ -2629,20 +2924,6 @@ local function saveAll(force)
 		end
 	end
 	if varsAreEmpty() and not force then
-		-- Empty session (e.g. after a duplicate-addon wipe): do not stamp
-		-- lastSave* metadata or mutate AccountDB. Still try offline fallback
-		-- so logout can rewrite a usable snapshot if the pack is embedded.
-		if applyOfflineFallback() then
-			harvestAllAddOns()
-			harvestScanGlobals()
-			flushLiveAddonState()
-			saveFrames()
-			saveLive()
-			local n = snapshotVars(true)
-			saveAccountMirror()
-			refreshOfflineFallbackExport()
-			return n
-		end
 		return 0
 	end
 	harvestAllAddOns()
@@ -2652,7 +2933,6 @@ local function saveAll(force)
 	pcall(syncLeatrixToDB)
 	saveLive()
 	local n = snapshotVars(force)
-	saveAccountMirror()
 	local db = ForeverLayoutFixDB
 	db.lastSaveAt = time and time() or 0
 	db.lastSaveCount = n
@@ -2667,7 +2947,6 @@ local function saveAll(force)
 		acc._lastSavePlayer = db.lastSavePlayer
 		acc._lastSaveRealm = db.lastSaveRealm
 	end
-	refreshOfflineFallbackExport()
 	return n
 end
 
@@ -2692,7 +2971,7 @@ local function saveToProfile(name)
 		pack = scrubPack(copyClean(ForeverLayoutFixDB)),
 	}
 	acc.activeProfile = name
-	acc.profileEnabled = true
+	ForeverLayoutFixDB.lastProfile = name
 	return true, name
 end
 
@@ -2720,7 +2999,7 @@ local function refreshActiveProfilePack()
 	else
 		rec.pack.vars = rec.pack.vars or {}
 		if type(db.vars) == "table" then
-			for _, varName in ipairs({ "LeaPlusDB", "LeaMapsDB", "BAGANATOR_CONFIG", "BAGANATOR_CURRENT_PROFILE", "SYNDICATOR_CONFIG" }) do
+			for _, varName in ipairs({ "LeaPlusDB", "LeaMapsDB", "BAGANATOR_CONFIG", "BAGANATOR_CURRENT_PROFILE", "SYNDICATOR_CONFIG", "_detalhes_global", "_detalhes_database", "ThreatForeverDB", "DetailsTinyThreatDB", "SexyMap2DB", "XLootADB" }) do
 				if db.vars[varName] ~= nil then
 					rec.pack.vars[varName] = copyClean(db.vars[varName])
 				end
@@ -2754,6 +3033,25 @@ local function refreshActiveProfilePack()
 		end
 		if type(db.mbb) == "table" then
 			rec.pack.mbb = copyClean(db.mbb)
+		end
+		if type(db.sexyMapProfile) == "table" then
+			rec.pack.sexyMapProfile = copyClean(db.sexyMapProfile)
+		end
+		if type(db.sexyMapBorders) == "table" then
+			rec.pack.sexyMapBorders = copyClean(db.sexyMapBorders)
+		end
+		if type(db.sexyMapCore) == "table" then
+			rec.pack.sexyMapCore = copyClean(db.sexyMapCore)
+		end
+		if db.sexyMapShape ~= nil then
+			rec.pack.sexyMapShape = db.sexyMapShape
+		end
+		if type(db.vars) == "table" then
+			for _, varName in ipairs({ "_detalhes_global", "_detalhes_database", "ThreatForeverDB", "DetailsTinyThreatDB", "SexyMap2DB", "XLootADB" }) do
+				if db.vars[varName] ~= nil then
+					rec.pack.vars[varName] = copyClean(db.vars[varName])
+				end
+			end
 		end
 	end
 	rec.savedAt = time and time() or 0
@@ -2810,11 +3108,7 @@ local function setActiveProfile(name, enabled)
 		return false, "No such profile."
 	end
 	acc.activeProfile = name
-	if enabled ~= nil then
-		acc.profileEnabled = enabled and true or false
-	else
-		acc.profileEnabled = true
-	end
+	ForeverLayoutFixDB.lastProfile = name
 	return true, name
 end
 
@@ -2895,75 +3189,8 @@ local function startLoginRestore()
 		return
 	end
 	loginRestoreStarted = true
-	hydrateFromAccount()
-	applyActiveProfilePack()
 	harvestAllAddOns()
 	harvestScanGlobals()
-	if snapshotPrefer.BAGANATOR_CONFIG then
-		local vars = ForeverLayoutFixDB.vars
-		if type(vars) == "table" then
-			pcall(injectOne, "BAGANATOR_CONFIG", vars.BAGANATOR_CONFIG, true)
-			pcall(injectOne, "BAGANATOR_CURRENT_PROFILE", vars.BAGANATOR_CURRENT_PROFILE, true)
-			pcall(injectOne, "SYNDICATOR_CONFIG", vars.SYNDICATOR_CONFIG, true)
-		end
-	end
-	injectVars({ late = true })
-	restoreProfileAddons(false)
-	watchOpeningCinematic()
-	C_Timer.After(0.5, function()
-		harvestAllAddOns()
-		harvestScanGlobals()
-		injectVars({ late = true })
-		applyFrames()
-		restoreLive()
-		restoreProfileAddons(true)
-		pcall(applyLeatrixSnapshot)
-	end)
-	C_Timer.After(2, function()
-		injectVars({ late = true })
-		applyFrames()
-		restoreLive()
-		restoreProfileAddons(true)
-		pcall(applyLeatrixSnapshot)
-		restoreBlizzardUI({ bars = false })
-		saveFrames()
-		local bars = ForeverLayoutFixDB.actionBars
-		if type(bars) == "table" and next(bars) then
-			chat("Action bars: click Enable in /flf profiles while out of combat to place them.")
-		end
-	end)
-	local tries = 0
-	C_Timer.NewTicker(1, function(self)
-		tries = tries + 1
-		restoreLive()
-		if tries >= 12 then
-			self:Cancel()
-		end
-	end)
-	-- Leatrix Plus registers its LC→DB logout writer during PLAYER_LOGIN.
-	-- We load before Leatrix (! prefix), so a logout handler registered here
-	-- would run BEFORE Leatrix exports — snapshotting stale LeaPlusDB.
-	-- Defer registration to the next frame so we run after that export.
-	C_Timer.After(0, function()
-		local late = CreateFrame("Frame")
-		late:RegisterEvent("PLAYER_LOGOUT")
-		late:SetScript("OnEvent", function()
-			if leatrixImportPending then
-				local src = ForeverLayoutFixDB.vars and ForeverLayoutFixDB.vars.LeaPlusDB
-				if type(src) == "table" then
-					_G.LeaPlusDB = _G.LeaPlusDB or {}
-					mergeInto(_G.LeaPlusDB, src)
-				end
-			else
-				pcall(syncLeatrixToDB)
-			end
-			saveAll(false)
-			pcall(refreshActiveProfilePack)
-		end)
-	end)
-	C_Timer.NewTicker(20, function()
-		saveLive()
-	end)
 end
 
 local f = CreateFrame("Frame")
@@ -2972,67 +3199,23 @@ f:RegisterEvent("PLAYER_LOGIN")
 f:SetScript("OnEvent", function(_, event, arg1)
 	if event == "ADDON_LOADED" then
 		harvestMetadata(arg1)
-		injectAddonVars(arg1, { replace = true })
 		if arg1 == "Platynator" then
 			displayAddonsSettled = true
 		end
-		if arg1 == "Baganator" or arg1 == "Syndicator" then
-			C_Timer.After(0, function()
-				restoreLive()
-			end)
-		end
-		if arg1 == "Leatrix_Plus" then
-			C_Timer.After(0, function()
-				pcall(applyLeatrixSnapshot)
-				watchOpeningCinematic()
-			end)
-		end
-		if arg1 == "MidnightSimpleUnitFrames" or arg1 == "EllesmereUI" then
-			C_Timer.After(0, function()
-				restoreProfileAddons(false)
-			end)
-		end
 		if arg1 == ADDON_NAME then
-			local dup = false
-			pcall(function()
-				local GetInfo = C_AddOns and C_AddOns.GetAddOnInfo or GetAddOnInfo
-				local n = C_AddOns and C_AddOns.GetNumAddOns and C_AddOns.GetNumAddOns() or GetNumAddOns()
-				for i = 1, n do
-					local name = GetInfo(i)
-					if name == "ForeverLayoutFix" and ADDON_NAME ~= "ForeverLayoutFix" then
-						dup = true
-						break
-					end
+			local n = 0
+			local acc = ensureProfileStore()
+			if type(acc.profiles) == "table" then
+				for _ in pairs(acc.profiles) do
+					n = n + 1
 				end
-			end)
-			if dup then
-				chat("3.1 WARNING: duplicate addon folder ForeverLayoutFix detected — disable/remove it. It shares SavedVariables and can wipe snapshots on /reload.")
-			else
-				local disk = rawget(_G, "FLF_DISK_READY") and "profiles published" or "run Setup\\FLF_Setup.cmd after Save"
-				chat("3.14 loaded. " .. disk .. ". /flf profiles")
 			end
+			chat("4.1 loaded. " .. n .. " layout profile(s). /flf profiles")
 		end
 		return
 	end
 	if event == "PLAYER_LOGIN" then
 		displayAddonsSettled = true
-		local ok, src = hydrateFromAccount(false)
-		if not ok and varsAreEmpty() and applyOfflineFallback() then
-			ok, src = true, "offline-fallback"
-		end
-		local profileOk, profileName = applyActiveProfilePack()
-		local n = varsCount()
-		if profileOk then
-			chat("profile '" .. tostring(profileName) .. "' applied (" .. n .. " tables).")
-		elseif ok then
-			chat("restored " .. n .. " mirrored tables from account backup (" .. tostring(src) .. ").")
-		elseif n > 0 then
-			chat("3.1 ready (" .. n .. " mirrored tables).")
-		else
-			local acc = ForeverLayoutFixAccountDB
-			local hasAcc = type(acc) == "table" and (acc._last ~= nil or next(acc) ~= nil)
-			chat("3.1 ready (0 mirrored tables). " .. (hasAcc and "Account backup present but no name match — /flf save or /flf profiles." or "Run /flf save after setup, then /flf profiles."))
-		end
 		startLoginRestore()
 	end
 end)
@@ -3436,7 +3619,7 @@ local function ensureDebugFrame()
 	local ver = header:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	ver:SetPoint("TOPRIGHT", -40, -18)
 	ver:SetTextColor(FLF_UI.muted[1], FLF_UI.muted[2], FLF_UI.muted[3], 1)
-	local metaVer = "3.14"
+	local metaVer = "4.1"
 	pcall(function()
 		if C_AddOns and C_AddOns.GetAddOnMetadata then
 			metaVer = C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version") or metaVer
@@ -3874,7 +4057,7 @@ local function ensureProfileFrame()
 	emptyHint:SetPoint("RIGHT", -12, 0)
 	emptyHint:SetJustifyH("LEFT")
 	emptyHint:SetTextColor(FLF_UI.muted[1], FLF_UI.muted[2], FLF_UI.muted[3], 1)
-	emptyHint:SetText("No profiles yet. On your main: Save settings, close WoW, run Setup\\FLF_Setup.cmd.")
+	emptyHint:SetText("No profiles yet. Set up your UI, type a name above, then Save settings.")
 	f.emptyHint = emptyHint
 
 	local status = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -3928,7 +4111,7 @@ local function ensureProfileFrame()
 				row.profileName = name
 				row:Show()
 				local rec = acc.profiles[name]
-				local mark = (acc.activeProfile == name and acc.profileEnabled ~= false) and "  (active)" or ""
+				local mark = (ForeverLayoutFixDB.lastProfile == name) and "  (this character)" or ""
 				row.label:SetText(name .. mark)
 				if name == selectedProfileName then
 					row.label:SetTextColor(FLF_UI.teal[1], FLF_UI.teal[2], FLF_UI.teal[3], 1)
@@ -3963,11 +4146,7 @@ local function ensureProfileFrame()
 				f.emptyHint:Hide()
 			end
 		end
-		if diskBridgeOn() then
-			sub:SetText("After Save settings: close WoW and run Setup\\FLF_Setup.cmd")
-		else
-			sub:SetText("Run Setup\\FLF_Setup.cmd with WoW closed")
-		end
+		sub:SetText("Save a layout here, then Enable it on this character.")
 	end
 	f.refreshList = refreshList
 
@@ -3981,7 +4160,7 @@ local function ensureProfileFrame()
 		local ok, err = saveToProfile(currentName() or "Default")
 		if ok then
 			selectedProfileName = err
-			setStatus("Saved '" .. err .. "'. Close WoW and run Setup\\FLF_Setup.cmd before switching characters.", true)
+			setStatus("Saved '" .. err .. "'. Enable it on another character (or this one) when you want that layout.", true)
 			refreshList()
 		else
 			setStatus(err or "Save failed.", false)
@@ -3996,6 +4175,8 @@ local function ensureProfileFrame()
 			snapshotPrefer.BAGANATOR_CONFIG = true
 			snapshotPrefer.BAGANATOR_CURRENT_PROFILE = true
 			snapshotPrefer.SYNDICATOR_CONFIG = true
+			snapshotPrefer.SexyMap2DB = true
+			snapshotPrefer.XLootADB = true
 			local applied = applyActiveProfilePack()
 			if applied then
 				local vars = ForeverLayoutFixDB.vars
@@ -4003,6 +4184,8 @@ local function ensureProfileFrame()
 					pcall(injectOne, "BAGANATOR_CONFIG", vars.BAGANATOR_CONFIG, true)
 					pcall(injectOne, "BAGANATOR_CURRENT_PROFILE", vars.BAGANATOR_CURRENT_PROFILE, true)
 					pcall(injectOne, "SYNDICATOR_CONFIG", vars.SYNDICATOR_CONFIG, true)
+					pcall(injectOne, "SexyMap2DB", vars.SexyMap2DB, true)
+					pcall(injectOne, "XLootADB", vars.XLootADB, true)
 				end
 				injectVars({ late = true })
 				restoreLive()
@@ -4094,13 +4277,8 @@ local function ensureProfileFrame()
 	end)
 
 	f:SetScript("OnShow", function()
-		if diskBridgeOn() then
-			sub:SetText("After Save settings: close WoW and run Setup\\FLF_Setup.cmd")
-			setStatus("Save on your main character, close the game, run the .cmd, then log the alt.", true)
-		else
-			sub:SetText("Run Setup\\FLF_Setup.cmd with WoW closed")
-			setStatus("Close WoW and run Interface\\AddOns\\!ForeverLayoutFix\\Setup\\FLF_Setup.cmd", false)
-		end
+		sub:SetText("Save a layout here, then Enable it on this character.")
+		setStatus("Profiles are account-wide. Enable copies addon options, macros, binds, and bars onto this character.", true)
 		refreshList()
 		C_Timer.After(0, refreshList)
 	end)
@@ -4124,6 +4302,10 @@ SLASH_FOREVERLAYOUTFIX2 = "/ff"
 SlashCmdList.FOREVERLAYOUTFIX = function(msg)
 	local raw = strtrim(tostring(msg or ""))
 	msg = string.lower(raw)
+	if msg == "" or msg == "profiles" or msg == "profile" then
+		showProfileWindow()
+		return
+	end
 	if msg == "verbose" then
 		debugOn = not debugOn
 		ForeverLayoutFixDB.debug = debugOn
@@ -4134,40 +4316,28 @@ SlashCmdList.FOREVERLAYOUTFIX = function(msg)
 		showDebugWindow()
 		return
 	end
-	if msg == "export" then
-		showExportWindow()
-		return
-	end
-	if msg == "profiles" or msg == "profile" then
-		showProfileWindow()
-		return
-	end
 	if msg == "save" then
-		local n = saveAll(true)
-		local extra = ""
-		local vars = ForeverLayoutFixDB.vars
-		if vars then
-			if vars.Bartender4DB then extra = extra .. " Bartender4=yes" end
-			if vars.BAGANATOR_CONFIG then extra = extra .. " Baganator=yes" end
-			if vars.SYNDICATOR_CONFIG then extra = extra .. " Syndicator=yes" end
-			if vars.SexyMap2DB then extra = extra .. " SexyMap=yes" end
-			if vars.RXPSettings or vars.RXPCData then extra = extra .. " RXP=yes" end
-			if vars.PLATYNATOR_CONFIG then extra = extra .. " Platynator=yes" end
-			if vars.LeaPlusDB then extra = extra .. " Leatrix=yes" end
-			if vars.MSUF_DB or vars.MSUF_GlobalDB then extra = extra .. " MSUF=yes" end
-			if vars.EllesmereUIDB then extra = extra .. " Ellesmere=yes" end
-			if vars.WIM3_Data then extra = extra .. " WIM=yes" end
+		local acc = ensureProfileStore()
+		local name = sanitizeProfileName(ForeverLayoutFixDB.lastProfile) or sanitizeProfileName(acc.activeProfile)
+		if not name then
+			showProfileWindow()
+			chat("Type a profile name in /flf profiles, then Save settings.")
+			return
 		end
-		chat("saved " .. n .. " addon tables." .. extra .. "  /reload to test.")
+		local ok, err = saveToProfile(name)
+		if ok then
+			chat("saved layout '" .. err .. "'. Enable it on another character when you want it.")
+		else
+			chat(err or "Save failed.")
+		end
 		return
 	end
 	if msg == "help" then
-		chat("/flf save     — snapshot every addon's settings")
-		chat("/flf profiles — layout profiles (Save, close WoW, run Setup\\FLF_Setup.cmd, then alts work). After Enable, type /reload. Enable also restores Edit Mode, UI CVars, macros, and action bars.")
-		chat("/flf export   — manual WTF copy if the disk bridge is off")
-		chat("/flf list     — show mirrored table names")
-		chat("/flf debug    — open support dump (Select All → Ctrl+C)")
-		chat("/flf verbose  — toggle inject/snapshot log spam")
+		chat("/flf            — layout profiles")
+		chat("/flf profiles   — save / enable / switch layouts")
+		chat("/flf save       — overwrite the last layout used on this character")
+		chat("/flf list       — addon tables in the current snapshot")
+		chat("/flf debug      — support dump")
 		return
 	end
 	local vars = ForeverLayoutFixDB.vars
@@ -4181,8 +4351,8 @@ SlashCmdList.FOREVERLAYOUTFIX = function(msg)
 		table.sort(names)
 	end
 	if msg == "list" or n <= 50 then
-		chat("mirrored tables=" .. n .. (n > 0 and (": " .. table.concat(names, ", ")) or " (none — /flf save after setup)"))
+		chat("snapshot tables=" .. n .. (n > 0 and (": " .. table.concat(names, ", ")) or " (none — Save settings in /flf profiles)"))
 	else
-		chat("mirrored tables=" .. n .. " (type /flf list for names)")
+		chat("snapshot tables=" .. n .. " (type /flf list for names)")
 	end
 end

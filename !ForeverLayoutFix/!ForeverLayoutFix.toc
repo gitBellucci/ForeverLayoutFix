@@ -1,14 +1,10 @@
 ## Interface: 11500, 11507, 11508, 11509, 11510, 16000, 16001
 ## Title: !ForeverLayoutFix
-## Notes: Layout profiles for WoW Forever. After Save settings, close WoW and run Setup\FLF_Setup.cmd so alts can load the profile.
+## Notes: Named layout profiles: addon settings, macros, keybinds, and action bars. Save on one character, Enable on any other.
 ## Author: Bellucci
-## Version: 3.14
-## OptionalDeps: !FLF_Data
-## SavedVariables: ForeverLayoutFixAccountDB
+## Version: 4.1
+## SavedVariables: ForeverLayoutFixProfilesDB, ForeverLayoutFixAccountDB
 ## SavedVariablesPerCharacter: ForeverLayoutFixDB
-## LoadSavedVariablesFirst: 1
 ## X-Curse-Project-ID: 1703528
 
-FLF_PreserveLoadedSV.lua
-FLF_OfflineFallback.lua
 !ForeverLayoutFix.lua
